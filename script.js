@@ -165,7 +165,12 @@ function renderImageCard(imgData) {
     const isSaved = state.saves[imgData.id];
     
     card.innerHTML = `
-        <img src="${imgData.url}" alt="${imgData.title}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 400 300%22><rect fill=%22%23f0f0f0%22 width=%22400%22 height=%22300%22/><text fill=%22%23999%22 font-size=%2216%22 x=%22150%22 y=%22150%22>图片加载失败</text></svg>'">
+        <div class="image-container">
+            <div class="image-placeholder"></div>
+            <img src="${imgData.url}" alt="${imgData.title}" loading="lazy" 
+                onerror="this.style.display='none'; this.previousElementSibling.style.display='block';"
+                onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
+        </div>
         <div class="item-actions">
             <button class="action-btn like ${isLiked ? 'liked' : ''}" data-id="${imgData.id}" title="点赞">
                 ${isLiked ? '❤️' : '🤍'}
@@ -180,6 +185,13 @@ function renderImageCard(imgData) {
     
     const likeBtn = card.querySelector('.like');
     const saveBtn = card.querySelector('.save');
+    const img = card.querySelector('img');
+    
+    // 图片加载完成处理
+    if (img.complete) {
+        img.classList.add('loaded');
+        img.previousElementSibling.style.display = 'none';
+    }
     
     likeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
