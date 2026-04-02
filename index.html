@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pinterest素材收集站</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <header class="header">
+        <div class="header-left">
+            <h1 class="logo">素材收集</h1>
+        </div>
+        <div class="header-center">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="搜索素材...">
+                <button id="searchBtn">搜索</button>
+            </div>
+        </div>
+        <div class="header-right">
+            <button id="uploadBtn" class="btn-primary">上传素材</button>
+            <div class="user-menu" id="userMenu">
+                <button id="loginBtn" class="btn-secondary">登录</button>
+                <button id="registerBtn" class="btn-secondary">注册</button>
+            </div>
+            <div class="user-info" id="userInfo" style="display: none;">
+                <span id="userName"></span>
+                <button id="logoutBtn" class="btn-secondary">退出</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区域 -->
+    <main class="main-content">
+        <div class="masonry-grid" id="masonryGrid">
+            <!-- 图片将通过 JavaScript 动态插入 -->
+        </div>
+        
+        <!-- 加载指示器 -->
+        <div class="loader" id="loader" style="display: none;">
+            <div class="spinner"></div>
+            <span>加载中...</span>
+        </div>
+        
+        <!-- 加载完毕提示 -->
+        <div class="no-more" id="noMore" style="display: none;">
+            <span>没有更多素材了</span>
+        </div>
+    </main>
+
+    <!-- 登录弹窗 -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content">
+            <span class="modal-close" id="closeLogin">&times;</span>
+            <h2>登录</h2>
+            <form id="loginForm">
+                <input type="text" id="loginUsername" placeholder="用户名" required>
+                <input type="password" id="loginPassword" placeholder="密码" required>
+                <button type="submit" class="btn-primary">登录</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 注册弹窗 -->
+    <div class="modal" id="registerModal">
+        <div class="modal-content">
+            <span class="modal-close" id="closeRegister">&times;</span>
+            <h2>注册</h2>
+            <form id="registerForm">
+                <input type="text" id="regUsername" placeholder="用户名" required>
+                <input type="password" id="regPassword" placeholder="密码" required>
+                <input type="password" id="regConfirmPassword" placeholder="确认密码" required>
+                <button type="submit" class="btn-primary">注册</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 上传弹窗 -->
+    <div class="modal" id="uploadModal">
+        <div class="modal-content">
+            <span class="modal-close" id="closeUpload">&times;</span>
+            <h2>上传素材</h2>
+            <form id="uploadForm">
+                <div class="upload-tabs">
+                    <button type="button" class="upload-tab active" data-tab="url">URL上传</button>
+                    <button type="button" class="upload-tab" data-tab="file">本地上传</button>
+                </div>
+                <div class="upload-panel" id="urlPanel">
+                    <input type="text" id="imgUrl" placeholder="图片URL地址">
+                </div>
+                <div class="upload-panel" id="filePanel" style="display: none;">
+                    <div class="file-upload-area" id="fileUploadArea">
+                        <input type="file" id="imgFile" accept="image/*" style="display: none;">
+                        <div class="upload-placeholder">
+                            <span class="upload-icon">📁</span>
+                            <span>点击选择图片或拖拽到这里</span>
+                        </div>
+                        <div class="file-preview" id="filePreview" style="display: none;">
+                            <img id="previewImg" src="" alt="预览">
+                            <button type="button" class="remove-file" id="removeFile">×</button>
+                        </div>
+                    </div>
+                </div>
+                <input type="text" id="imgTitle" placeholder="标题（可选）">
+                <button type="submit" class="btn-primary">上传</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
