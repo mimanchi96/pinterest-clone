@@ -1,4 +1,10 @@
-// ===== Pinterest素材收集网站 - script.js =====
+// ===== Pinterest素材收集网站 - script.js (Supabase版) =====
+
+// ===== Supabase 配置 =====
+const SUPABASE_URL = 'https://uprhclavqpfrrbqlaake.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_axC72otqGsnuScheHoyjgw_sjj_-lrh';
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ===== 全局状态 =====
 const state = {
@@ -9,10 +15,10 @@ const state = {
     hasMore: true,
     likes: {},
     saves: {},
-    uploadedFile: null  // 本地上传的图片数据
+    uploadedFile: null
 };
 
-// ===== 模拟图片数据 =====
+// ===== 模拟图片数据（数据库无数据时备用）=====
 const sampleImages = [
     { url: 'https://fastly.picsum.photos/id/10/400/300', title: '森林' },
     { url: 'https://fastly.picsum.photos/id/15/400/500', title: '瀑布' },
@@ -63,7 +69,6 @@ const elements = {
     loginForm: document.getElementById('loginForm'),
     registerForm: document.getElementById('registerForm'),
     uploadForm: document.getElementById('uploadForm'),
-    // 文件上传相关
     imgFile: document.getElementById('imgFile'),
     fileUploadArea: document.getElementById('fileUploadArea'),
     filePreview: document.getElementById('filePreview'),
@@ -74,36 +79,66 @@ const elements = {
 };
 
 // ===== 初始化 =====
-function init() {
-    loadUserState();
-    loadInteractionState();
-    loadUserUploads();  // 加载用户上传的图片
-    loadImages();
+async function init() {
+    await loadUserState();
+    await loadInteractionState();
+    await loadImages();
     bindEvents();
     setupInfiniteScroll();
     setupFileUpload();
 }
 
-// ===== 加载图片 =====
-function loadImages() {
+// ===== 从数据库加载图片 =====
+async function loadImages() {
     if (state.isLoading || !state.hasMore) return;
     
     state.isLoading = true;
     elements.loader.style.display = 'flex';
     
-    // 模拟异步加载
-    setTimeout(() => {
-        const start = (state.page - 1) * 12;
-        const end = start + 12;
-        const newImages = sampleImages.slice(start, end);
+    try {
+        const { data: images, error } = await supabase
+            .from('images')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .range((state.page - 1) * 12, state.page * 12 - 1);
         
-        if (newImages.length === 0) {
+        if (error) throw error;
+        
+        if (!images || images.length === 0) {
+            // 如果数据库没有图片，使用示例图片
+            if (state.page === 1) {
+                sampleImages.forEach((img, index) => {
+                    const imgData = {
+                        id: index + 1,
+                        url: img.url,
+                        title: img.title
+                    };
+                    state.images.push(imgData);
+                    renderImageCard(imgData);
+                });
+                state.page++;
+            }
             state.hasMore = false;
             elements.noMore.style.display = 'block';
         } else {
-            newImages.forEach((img, index) => {
+            images.forEach(imgData => {
+                state.images.push(imgData);
+                renderImageCard(imgData);
+            });
+            state.page++;
+            
+            if (images.length < 12) {
+                state.hasMore = false;
+                elements.noMore.style.display = 'block';
+            }
+        }
+    } catch (error) {
+        console.error('加载图片失败:', error);
+        // 降级使用示例图片
+        if (state.page === 1) {
+            sampleImages.forEach((img, index) => {
                 const imgData = {
-                    id: start + index + 1,
+                    id: index + 1,
                     url: img.url,
                     title: img.title
                 };
@@ -112,10 +147,12 @@ function loadImages() {
             });
             state.page++;
         }
-        
-        state.isLoading = false;
-        elements.loader.style.display = 'none';
-    }, 500);
+        state.hasMore = false;
+        elements.noMore.style.display = 'block';
+    }
+    
+    state.isLoading = false;
+    elements.loader.style.display = 'none';
 }
 
 // ===== 渲染图片卡片 =====
@@ -141,7 +178,6 @@ function renderImageCard(imgData) {
     
     elements.grid.appendChild(card);
     
-    // 绑定卡片内按钮事件
     const likeBtn = card.querySelector('.like');
     const saveBtn = card.querySelector('.save');
     
@@ -157,37 +193,77 @@ function renderImageCard(imgData) {
 }
 
 // ===== 点赞功能 =====
-function toggleLike(id, btn) {
+async function toggleLike(id, btn) {
     if (!state.currentUser) {
         alert('请先登录');
         elements.loginModal.classList.add('active');
         return;
     }
     
-    const isLiked = state.likes[id];
-    state.likes[id] = !isLiked;
-    
-    btn.textContent = isLiked ? '🤍' : '❤️';
-    btn.classList.toggle('liked', !isLiked);
-    
-    saveInteractionState();
+    try {
+        const isLiked = state.likes[id];
+        
+        if (isLiked) {
+            // 取消点赞
+            await supabase
+                .from('likes')
+                .delete()
+                .eq('image_id', id)
+                .eq('user_id', state.currentUser.id);
+        } else {
+            // 添加点赞
+            await supabase
+                .from('likes')
+                .insert({
+                    image_id: id,
+                    user_id: state.currentUser.id
+                });
+        }
+        
+        state.likes[id] = !isLiked;
+        btn.textContent = isLiked ? '🤍' : '❤️';
+        btn.classList.toggle('liked', !isLiked);
+        
+    } catch (error) {
+        console.error('点赞操作失败:', error);
+    }
 }
 
 // ===== 收藏功能 =====
-function toggleSave(id, btn) {
+async function toggleSave(id, btn) {
     if (!state.currentUser) {
         alert('请先登录');
         elements.loginModal.classList.add('active');
         return;
     }
     
-    const isSaved = state.saves[id];
-    state.saves[id] = !isSaved;
-    
-    btn.textContent = isSaved ? '☆' : '★';
-    btn.classList.toggle('saved', !isSaved);
-    
-    saveInteractionState();
+    try {
+        const isSaved = state.saves[id];
+        
+        if (isSaved) {
+            // 取消收藏
+            await supabase
+                .from('saves')
+                .delete()
+                .eq('image_id', id)
+                .eq('user_id', state.currentUser.id);
+        } else {
+            // 添加收藏
+            await supabase
+                .from('saves')
+                .insert({
+                    image_id: id,
+                    user_id: state.currentUser.id
+                });
+        }
+        
+        state.saves[id] = !isSaved;
+        btn.textContent = isSaved ? '☆' : '★';
+        btn.classList.toggle('saved', !isSaved);
+        
+    } catch (error) {
+        console.error('收藏操作失败:', error);
+    }
 }
 
 // ===== 无限滚动 =====
@@ -213,25 +289,106 @@ function setupInfiniteScroll() {
 }
 
 // ===== 用户系统 =====
-// 加载用户状态
-function loadUserState() {
+async function loadUserState() {
     const savedUser = localStorage.getItem('pinterest_user');
     if (savedUser) {
-        state.currentUser = JSON.parse(savedUser);
+        const userData = JSON.parse(savedUser);
+        // 从数据库获取最新用户信息
+        const { data: users } = await supabase
+            .from('users')
+            .select('*')
+            .eq('username', userData.username)
+            .limit(1);
+        
+        if (users && users.length > 0) {
+            state.currentUser = users[0];
+            updateUserUI();
+        } else {
+            localStorage.removeItem('pinterest_user');
+        }
+    }
+}
+
+async function login(username, password) {
+    try {
+        const { data: users, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('username', username)
+            .eq('password', password)
+            .limit(1);
+        
+        if (error) throw error;
+        
+        if (users && users.length > 0) {
+            state.currentUser = users[0];
+            localStorage.setItem('pinterest_user', JSON.stringify(users[0]));
+            updateUserUI();
+            closeModals();
+            
+            // 加载用户的点赞和收藏
+            await loadInteractionState();
+            alert('登录成功');
+        } else {
+            alert('用户名或密码错误');
+        }
+    } catch (error) {
+        console.error('登录失败:', error);
+        alert('登录失败，请重试');
+    }
+}
+
+async function register(username, password, confirmPassword) {
+    if (password !== confirmPassword) {
+        alert('两次密码输入不一致');
+        return;
+    }
+    
+    try {
+        // 检查用户名是否已存在
+        const { data: existing } = await supabase
+            .from('users')
+            .select('username')
+            .eq('username', username)
+            .limit(1);
+        
+        if (existing && existing.length > 0) {
+            alert('用户名已存在');
+            return;
+        }
+        
+        // 创建新用户
+        const { data: newUser, error } = await supabase
+            .from('users')
+            .insert({
+                username: username,
+                password: password
+            })
+            .select()
+            .limit(1);
+        
+        if (error) throw error;
+        
+        state.currentUser = newUser[0];
+        localStorage.setItem('pinterest_user', JSON.stringify(newUser[0]));
         updateUserUI();
+        closeModals();
+        alert('注册成功');
+    } catch (error) {
+        console.error('注册失败:', error);
+        alert('注册失败，请重试');
     }
 }
 
-// 保存用户状态
-function saveUserState() {
-    if (state.currentUser) {
-        localStorage.setItem('pinterest_user', JSON.stringify(state.currentUser));
-    } else {
-        localStorage.removeItem('pinterest_user');
-    }
+function logout() {
+    state.currentUser = null;
+    state.likes = {};
+    state.saves = {};
+    localStorage.removeItem('pinterest_user');
+    updateUserUI();
+    alert('已退出登录');
 }
 
-// 更新用户UI
 function updateUserUI() {
     if (state.currentUser) {
         elements.userMenu.style.display = 'none';
@@ -243,118 +400,48 @@ function updateUserUI() {
     }
 }
 
-// 登录
-function login(username, password) {
-    const users = JSON.parse(localStorage.getItem('pinterest_users') || '[]');
-    const user = users.find(u => u.username === username && u.password === password);
-    
-    if (user) {
-        state.currentUser = { username: user.username };
-        saveUserState();
-        updateUserUI();
-        closeModals();
-        loadUserUploads();  // 登录后加载用户上传的图片
-        alert('登录成功');
-    } else {
-        alert('用户名或密码错误');
-    }
-}
-
-// 注册
-function register(username, password, confirmPassword) {
-    if (password !== confirmPassword) {
-        alert('两次密码输入不一致');
-        return;
-    }
-    
-    const users = JSON.parse(localStorage.getItem('pinterest_users') || '[]');
-    
-    if (users.find(u => u.username === username)) {
-        alert('用户名已存在');
-        return;
-    }
-    
-    users.push({ username, password });
-    localStorage.setItem('pinterest_users', JSON.stringify(users));
-    
-    state.currentUser = { username };
-    saveUserState();
-    updateUserUI();
-    closeModals();
-    alert('注册成功');
-}
-
-// 登出
-function logout() {
-    state.currentUser = null;
-    state.likes = {};
-    state.saves = {};
-    localStorage.removeItem('pinterest_user');
-    saveInteractionState();
-    updateUserUI();
-    alert('已退出登录');
-}
-
-// ===== 交互状态 =====
-function loadInteractionState() {
-    const likes = localStorage.getItem('pinterest_likes');
-    const saves = localStorage.getItem('pinterest_saves');
-    
-    state.likes = likes ? JSON.parse(likes) : {};
-    state.saves = saves ? JSON.parse(saves) : {};
-}
-
-function saveInteractionState() {
-    localStorage.setItem('pinterest_likes', JSON.stringify(state.likes));
-    localStorage.setItem('pinterest_saves', JSON.stringify(state.saves));
-}
-
-// ===== 用户上传图片管理 =====
-function saveUserUploads(imageData) {
+// ===== 加载用户的点赞和收藏 =====
+async function loadInteractionState() {
     if (!state.currentUser) return;
     
-    const key = `pinterest_uploads_${state.currentUser.username}`;
-    const uploads = JSON.parse(localStorage.getItem(key) || '[]');
-    uploads.unshift(imageData);
-    localStorage.setItem(key, JSON.stringify(uploads));
-}
-
-function loadUserUploads() {
-    if (!state.currentUser) return;
-    
-    const key = `pinterest_uploads_${state.currentUser.username}`;
-    const uploads = JSON.parse(localStorage.getItem(key) || '[]');
-    
-    uploads.forEach(imgData => {
-        state.images.push(imgData);
-        renderImageCard(imgData);
-    });
-}
-
-// ===== 弹窗操作 =====
-function openModal(modal) {
-    modal.classList.add('active');
-}
-
-function closeModals() {
-    elements.loginModal.classList.remove('active');
-    elements.registerModal.classList.remove('active');
-    elements.uploadModal.classList.remove('active');
+    try {
+        // 加载点赞
+        const { data: likes } = await supabase
+            .from('likes')
+            .select('image_id')
+            .eq('user_id', state.currentUser.id);
+        
+        if (likes) {
+            likes.forEach(like => {
+                state.likes[like.image_id] = true;
+            });
+        }
+        
+        // 加载收藏
+        const { data: saves } = await supabase
+            .from('saves')
+            .select('image_id')
+            .eq('user_id', state.currentUser.id);
+        
+        if (saves) {
+            saves.forEach(save => {
+                state.saves[save.image_id] = true;
+            });
+        }
+    } catch (error) {
+        console.error('加载互动状态失败:', error);
+    }
 }
 
 // ===== 本地文件上传功能 =====
 function setupFileUpload() {
-    // 切换上传方式标签
     const uploadTabs = document.querySelectorAll('.upload-tab');
     uploadTabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const tabType = tab.dataset.tab;
-            
-            // 更新标签状态
             uploadTabs.forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             
-            // 显示对应面板
             if (tabType === 'url') {
                 elements.urlPanel.style.display = 'block';
                 elements.filePanel.style.display = 'none';
@@ -365,15 +452,12 @@ function setupFileUpload() {
         });
     });
     
-    // 点击上传区域触发文件选择
     elements.fileUploadArea.addEventListener('click', () => {
         elements.imgFile.click();
     });
     
-    // 文件选择处理
     elements.imgFile.addEventListener('change', handleFileSelect);
     
-    // 拖拽上传
     elements.fileUploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
         elements.fileUploadArea.classList.add('dragover');
@@ -386,14 +470,12 @@ function setupFileUpload() {
     elements.fileUploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
         elements.fileUploadArea.classList.remove('dragover');
-        
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             handleFile(files[0]);
         }
     });
     
-    // 移除文件
     elements.removeFile.addEventListener('click', (e) => {
         e.stopPropagation();
         state.uploadedFile = null;
@@ -411,24 +493,19 @@ function handleFileSelect(e) {
 }
 
 function handleFile(file) {
-    // 验证文件类型
     if (!file.type.startsWith('image/')) {
         alert('请选择图片文件');
         return;
     }
     
-    // 验证文件大小 (最大5MB)
     if (file.size > 5 * 1024 * 1024) {
         alert('图片大小不能超过5MB');
         return;
     }
     
-    // 读取文件并转换为Data URL
     const reader = new FileReader();
     reader.onload = (e) => {
         state.uploadedFile = e.target.result;
-        
-        // 显示预览
         elements.previewImg.src = state.uploadedFile;
         elements.fileUploadArea.querySelector('.upload-placeholder').style.display = 'none';
         elements.filePreview.style.display = 'block';
@@ -439,92 +516,117 @@ function handleFile(file) {
     reader.readAsDataURL(file);
 }
 
-// ===== 上传图片 =====
-function uploadImage(url, title) {
+// ===== 上传图片到Supabase Storage =====
+async function uploadImage(url, title) {
     if (!state.currentUser) {
         alert('请先登录');
         elements.loginModal.classList.add('active');
         return;
     }
     
-    // 如果有本地上传的文件，优先使用
-    let imgUrl = url;
-    let imgTitle = title || '用户上传';
-    
-    if (state.uploadedFile) {
-        imgUrl = state.uploadedFile;
-        imgTitle = title || '本地上传';
-    } else if (!url) {
-        alert('请选择图片或输入URL');
-        return;
+    try {
+        let imgUrl = url;
+        let imgTitle = title || '用户上传';
+        
+        // 如果有本地上传的文件，上传到Supabase Storage
+        if (state.uploadedFile) {
+            // 提取base64数据
+            const base64Data = state.uploadedFile.split(',')[1];
+            const fileExt = state.uploadedFile.split(';')[0].split('/')[1];
+            const fileName = `${Date.now()}.${fileExt}`;
+            
+            // 上传到Storage
+            const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('images')
+                .upload(fileName, decodeBase64(base64Data), {
+                    contentType: `image/${fileExt}`
+                });
+            
+            if (uploadError) throw uploadError;
+            
+            // 获取公开URL
+            const { data: { publicUrl } } = supabase.storage
+                .from('images')
+                .getPublicUrl(fileName);
+            
+            imgUrl = publicUrl;
+            imgTitle = title || '本地上传';
+        } else if (!url) {
+            alert('请选择图片或输入URL');
+            return;
+        }
+        
+        // 保存到数据库
+        const { data: newImage, error } = await supabase
+            .from('images')
+            .insert({
+                user_id: state.currentUser.id,
+                url: imgUrl,
+                title: imgTitle,
+                is_local: !!state.uploadedFile
+            })
+            .select()
+            .limit(1);
+        
+        if (error) throw error;
+        
+        // 立即显示新上传的图片
+        state.images.unshift(newImage[0]);
+        renderImageCard(newImage[0]);
+        
+        // 清空上传状态
+        state.uploadedFile = null;
+        elements.filePreview.style.display = 'none';
+        elements.fileUploadArea.querySelector('.upload-placeholder').style.display = 'flex';
+        
+        elements.uploadForm.reset();
+        closeModals();
+        alert('上传成功');
+        
+    } catch (error) {
+        console.error('上传失败:', error);
+        alert('上传失败，请重试');
     }
-    
-    const newImage = {
-        id: Date.now(),  // 使用时间戳作为唯一ID
-        url: imgUrl,
-        title: imgTitle
-    };
-    
-    state.images.unshift(newImage);
-    
-    const card = document.createElement('div');
-    card.className = 'masonry-item';
-    card.dataset.id = newImage.id;
-    card.innerHTML = `
-        <img src="${newImage.url}" alt="${newImage.title}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 400 300%22><rect fill=%22%23f0f0f0%22 width=%22400%22 height=%22300%22/><text fill=%22%23999%22 font-size=%2216%22 x=%22150%22 y=%22150%22>图片加载失败</text></svg>'">
-        <div class="item-actions">
-            <button class="action-btn like" data-id="${newImage.id}" title="点赞">🤍</button>
-            <button class="action-btn save" data-id="${newImage.id}" title="收藏">☆</button>
-        </div>
-    `;
-    
-    elements.grid.insertBefore(card, elements.grid.firstChild);
-    
-    const likeBtn = card.querySelector('.like');
-    const saveBtn = card.querySelector('.save');
-    
-    likeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleLike(newImage.id, likeBtn);
-    });
-    
-    saveBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleSave(newImage.id, saveBtn);
-    });
-    
-    // 保存到用户上传记录
-    saveUserUploads(newImage);
-    
-    // 清空上传状态
-    state.uploadedFile = null;
-    elements.filePreview.style.display = 'none';
-    elements.fileUploadArea.querySelector('.upload-placeholder').style.display = 'flex';
-    
-    alert('上传成功');
+}
+
+// 辅助函数：base64转Blob
+function decodeBase64(base64) {
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: 'image/jpeg' });
+}
+
+// ===== 弹窗操作 =====
+function openModal(modal) {
+    modal.classList.add('active');
+}
+
+function closeModals() {
+    elements.loginModal.classList.remove('active');
+    elements.registerModal.classList.remove('active');
+    elements.uploadModal.classList.remove('active');
 }
 
 // ===== 绑定事件 =====
 function bindEvents() {
-    // 登录按钮
     elements.loginBtn.addEventListener('click', () => {
         openModal(elements.loginModal);
     });
     
-    // 注册按钮
     elements.registerBtn.addEventListener('click', () => {
         openModal(elements.registerModal);
     });
     
-    // 上传按钮
     elements.uploadBtn.addEventListener('click', () => {
         openModal(elements.uploadModal);
     });
     
-    // 登出按钮
     elements.logoutBtn.addEventListener('click', logout);
     
-    // 关闭弹窗
     elements.closeLogin.addEventListener('click', () => {
         elements.loginModal.classList.remove('active');
     });
@@ -537,7 +639,6 @@ function bindEvents() {
         elements.uploadModal.classList.remove('active');
     });
     
-    // 点击弹窗外部关闭
     [elements.loginModal, elements.registerModal, elements.uploadModal].forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
@@ -546,7 +647,6 @@ function bindEvents() {
         });
     });
     
-    // 登录表单
     elements.loginForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const username = document.getElementById('loginUsername').value;
@@ -554,7 +654,6 @@ function bindEvents() {
         login(username, password);
     });
     
-    // 注册表单
     elements.registerForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const username = document.getElementById('regUsername').value;
@@ -563,17 +662,13 @@ function bindEvents() {
         register(username, password, confirmPassword);
     });
     
-    // 上传表单
     elements.uploadForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const url = document.getElementById('imgUrl').value;
         const title = document.getElementById('imgTitle').value;
         uploadImage(url, title);
-        elements.uploadForm.reset();
-        closeModals();
     });
     
-    // 搜索功能
     elements.searchBtn.addEventListener('click', () => {
         const keyword = elements.searchInput.value.trim();
         if (keyword) {
